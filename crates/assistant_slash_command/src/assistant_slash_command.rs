@@ -87,7 +87,7 @@ pub trait SlashCommand: 'static + Send + Sync {
         // perhaps another kind of delegate is needed here.
         delegate: Option<Arc<dyn LspAdapterDelegate>>,
         cx: &mut WindowContext,
-    ) -> Task<Result<SlashCommandOutput>>;
+    ) -> Task<BoxStream<Result<SlashCommandEvent>>>;
 }
 
 pub type RenderFoldPlaceholder = Arc<
@@ -96,8 +96,30 @@ pub type RenderFoldPlaceholder = Arc<
         + Fn(ElementId, Arc<dyn Fn(&mut WindowContext)>, &mut WindowContext) -> AnyElement,
 >;
 
+pub enum SlashCommandEvent {
+    StartMessage {
+        role: Role,
+    },
+    StartSection {
+        icon: IconName,
+        label: SharedString,
+        metadata: Option<serde_json::Value>,
+    },
+    Content {
+        text: String,
+    },
+    Progress {
+        message: String,
+        complete: f32,
+    },
+    EndSection {
+        metadata: Option<serde_json::Value>,
+    },
+}
+
 #[derive(Debug, Default, PartialEq)]
-pub struct SlashCommandOutput {
+pub struct SlashCommandMessage {
+    pub role: Option<Role>,
     pub text: String,
     pub sections: Vec<SlashCommandOutputSection<usize>>,
     pub run_commands_in_text: bool,

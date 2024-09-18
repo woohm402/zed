@@ -1790,7 +1790,21 @@ impl Context {
         let insert_output_task = cx.spawn(|this, mut cx| {
             let command_range = command_range.clone();
             async move {
-                let output = output.await;
+                let output = output.await?;
+
+                let pending_section_start;
+                let pending_section_end;
+                while let Some(event) = output.next().await {
+                    match event {
+                        StartMessage => {
+                            this.update(cx, |this, cx| this.insert_message(.., new_metadata, cx));
+                        }
+                        StartSection => {
+                            pending_section_start = self.buffer.read(cx).anchor_before(len);
+                            pending_section_end = self.buffer.read(cx).anchor_after(len);
+                        }
+                    }
+                }
                 this.update(&mut cx, |this, cx| match output {
                     Ok(mut output) => {
                         // Ensure section ranges are valid.
