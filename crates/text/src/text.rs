@@ -2424,6 +2424,15 @@ impl BufferSnapshot {
         }
         false
     }
+
+    pub fn with_edits<I, S, T>(&self, edits_iter: I) -> Self
+    where
+        I: IntoIterator<Item = (Range<S>, T)>,
+        S: ToOffset,
+        T: Into<Arc<str>>,
+    {
+        self.clone()
+    }
 }
 
 struct RopeBuilder<'a> {
