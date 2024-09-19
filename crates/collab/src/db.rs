@@ -23,6 +23,7 @@ use sea_orm::{
 };
 use semantic_version::SemanticVersion;
 use serde::{Deserialize, Serialize};
+use settings::SettingsKind;
 use std::ops::RangeInclusive;
 use std::{
     fmt::Write as _,
@@ -766,6 +767,7 @@ pub struct Worktree {
 pub struct WorktreeSettingsFile {
     pub path: String,
     pub content: String,
+    pub kind: SettingsKind,
 }
 
 pub struct NewExtensionVersion {

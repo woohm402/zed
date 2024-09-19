@@ -651,6 +651,12 @@ message UpdateWorktreeSettings {
     uint64 worktree_id = 2;
     string path = 3;
     optional string content = 4;
+    SettingsKind kind = 5;
+
+    enum SettingsKind {
+        Editorconfig = 0;
+        Zedconfig = 1;
+    }
 }
 
 message CreateProjectEntry {

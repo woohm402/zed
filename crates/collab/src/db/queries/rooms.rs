@@ -728,6 +728,8 @@ impl Database {
                 .await?;
             while let Some(db_settings_file) = db_settings_files.next().await {
                 let db_settings_file = db_settings_file?;
+                let kind =
+                    ::project::project_settings::settings_kind_from_proto(db_settings_file.kind)?;
                 if let Some(worktree) = worktrees
                     .iter_mut()
                     .find(|w| w.id == db_settings_file.worktree_id as u64)
@@ -735,6 +737,7 @@ impl Database {
                     worktree.settings_files.push(WorktreeSettingsFile {
                         path: db_settings_file.path,
                         content: db_settings_file.content,
+                        kind,
                     });
                 }
             }

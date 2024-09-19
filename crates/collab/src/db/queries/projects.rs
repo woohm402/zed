@@ -543,12 +543,14 @@ impl Database {
                     worktree_id: ActiveValue::Set(update.worktree_id as i64),
                     path: ActiveValue::Set(update.path.clone()),
                     content: ActiveValue::Set(content.clone()),
+                    kind: ActiveValue::Set(update.kind),
                 })
                 .on_conflict(
                     OnConflict::columns([
                         worktree_settings_file::Column::ProjectId,
                         worktree_settings_file::Column::WorktreeId,
                         worktree_settings_file::Column::Path,
+                        worktree_settings_file::Column::Kind,
                     ])
                     .update_column(worktree_settings_file::Column::Content)
                     .to_owned(),
@@ -560,6 +562,7 @@ impl Database {
                     project_id: ActiveValue::Set(project_id),
                     worktree_id: ActiveValue::Set(update.worktree_id as i64),
                     path: ActiveValue::Set(update.path.clone()),
+                    kind: ActiveValue::Set(update.kind),
                     ..Default::default()
                 })
                 .exec(&*tx)
@@ -796,10 +799,13 @@ impl Database {
                 .await?;
             while let Some(db_settings_file) = db_settings_files.next().await {
                 let db_settings_file = db_settings_file?;
+                let kind =
+                    ::project::project_settings::settings_kind_from_proto(db_settings_file.kind)?;
                 if let Some(worktree) = worktrees.get_mut(&(db_settings_file.worktree_id as u64)) {
                     worktree.settings_files.push(WorktreeSettingsFile {
                         path: db_settings_file.path,
                         content: db_settings_file.content,
+                        kind,
                     });
                 }
             }

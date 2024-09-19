@@ -45,6 +45,8 @@ nanoid.workspace = true
 open_ai.workspace = true
 supermaven_api.workspace = true
 parking_lot.workspace = true
+# TODO kb is there a better way?
+project.workspace = true
 prometheus = "0.13"
 prost.workspace = true
 rand.workspace = true
@@ -54,6 +56,8 @@ scrypt = "0.11"
 sea-orm = { version = "1.1.0-rc.1", features = ["sqlx-postgres", "postgres-array", "runtime-tokio-rustls", "with-uuid"] }
 semantic_version.workspace = true
 semver.workspace = true
+# TODO kb is there a better way?
+settings.workspace = true
 serde.workspace = true
 serde_derive.workspace = true
 serde_json.workspace = true

@@ -1,3 +1,4 @@
+use anyhow::Context;
 use collections::HashMap;
 use fs::Fs;
 use gpui::{AppContext, AsyncAppContext, BorrowAppContext, Model, ModelContext};
@@ -5,7 +6,7 @@ use paths::local_settings_file_relative_path;
 use rpc::{proto, AnyProtoClient, TypedEnvelope};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use settings::{Settings, SettingsSources, SettingsStore};
+use settings::{Settings, SettingsKind, SettingsSources, SettingsStore};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -14,7 +15,30 @@ use std::{
 use util::ResultExt;
 use worktree::{PathChange, UpdatedEntriesSet, Worktree, WorktreeId};
 
-use crate::worktree_store::{WorktreeStore, WorktreeStoreEvent};
+use crate::{
+    worktree_store::{WorktreeStore, WorktreeStoreEvent},
+    EDITORCONFIG_FILE_NAME,
+};
+
+pub fn settings_kind_to_proto(kind: &SettingsKind) -> i32 {
+    match kind {
+        SettingsKind::Editorconfig => proto::update_worktree_settings::SettingsKind::Editorconfig,
+        SettingsKind::Zedconfig => proto::update_worktree_settings::SettingsKind::Zedconfig,
+    }
+    .into()
+}
+
+pub fn settings_kind_from_proto(value: i32) -> anyhow::Result<SettingsKind> {
+    match proto::update_worktree_settings::SettingsKind::from_i32(value) {
+        Some(proto::update_worktree_settings::SettingsKind::Editorconfig) => {
+            Ok(SettingsKind::Editorconfig)
+        }
+        Some(proto::update_worktree_settings::SettingsKind::Zedconfig) => {
+            Ok(SettingsKind::Zedconfig)
+        }
+        _ => anyhow::bail!("invalid settings source kind {value}"),
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct ProjectSettings {
@@ -246,13 +270,14 @@ impl SettingsObserver {
         let store = cx.global::<SettingsStore>();
         for worktree in self.worktree_store.read(cx).worktrees() {
             let worktree_id = worktree.read(cx).id().to_proto();
-            for (path, content) in store.local_settings(worktree.read(cx).id()) {
+            for (path, content, kind) in store.local_settings(worktree.read(cx).id()) {
                 downstream_client
                     .send(proto::UpdateWorktreeSettings {
                         project_id,
                         worktree_id,
                         path: path.to_string_lossy().into(),
                         content: Some(content),
+                        kind: settings_kind_to_proto(&kind),
                     })
                     .log_err();
             }
@@ -268,6 +293,10 @@ impl SettingsObserver {
         envelope: TypedEnvelope<proto::UpdateWorktreeSettings>,
         mut cx: AsyncAppContext,
     ) -> anyhow::Result<()> {
+        let source = proto::update_worktree_settings::SettingsKind::from_i32(envelope.payload.kind)
+            .with_context(|| {
+                format!("Unexpected settings source kind {}", envelope.payload.kind)
+            })?;
         this.update(&mut cx, |this, cx| {
             let worktree_id = WorktreeId::from_proto(envelope.payload.worktree_id);
             let Some(worktree) = this
@@ -277,14 +306,29 @@ impl SettingsObserver {
             else {
                 return;
             };
-            this.update_settings(
-                worktree,
-                [(
-                    PathBuf::from(&envelope.payload.path).into(),
-                    envelope.payload.content,
-                )],
-                cx,
-            );
+
+            match source {
+                proto::update_worktree_settings::SettingsKind::Editorconfig => {
+                    this.update_editorconfig_settings(
+                        &worktree,
+                        [(
+                            PathBuf::from(&envelope.payload.path).into(),
+                            envelope.payload.content,
+                        )],
+                        cx,
+                    );
+                }
+                proto::update_worktree_settings::SettingsKind::Zedconfig => {
+                    this.update_settings(
+                        &worktree,
+                        [(
+                            PathBuf::from(&envelope.payload.path).into(),
+                            envelope.payload.content,
+                        )],
+                        cx,
+                    );
+                }
+            };
         })?;
         Ok(())
     }
@@ -354,6 +398,7 @@ impl SettingsObserver {
         };
 
         let mut settings_contents = Vec::new();
+        let mut editorconfig_contents = Vec::new();
         for (path, _, change) in changes.iter() {
             let removed = change == &PathChange::Removed;
             let abs_path = match worktree.read(cx).absolutize(path) {
@@ -381,26 +426,53 @@ impl SettingsObserver {
                         },
                     )
                 });
+            } else if path.ends_with(EDITORCONFIG_FILE_NAME) {
+                if let Some(settings_dir) = path.parent() {
+                    let fs = fs.clone();
+                    let settings_dir = Arc::<Path>::from(settings_dir);
+                    editorconfig_contents.push(async move {
+                        (
+                            settings_dir,
+                            if removed {
+                                None
+                            } else {
+                                Some(async move { fs.load(&abs_path).await }.await)
+                            },
+                        )
+                    });
+                }
             }
         }
 
-        if settings_contents.is_empty() {
+        if settings_contents.is_empty() && editorconfig_contents.is_empty() {
             return;
         }
 
         let worktree = worktree.clone();
         cx.spawn(move |this, cx| async move {
-            let settings_contents: Vec<(Arc<Path>, _)> =
-                futures::future::join_all(settings_contents).await;
+            let (settings_contents, editorconfig_contents): (
+                Vec<(Arc<Path>, _)>,
+                Vec<(Arc<Path>, _)>,
+            ) = futures::join!(
+                futures::future::join_all(settings_contents),
+                futures::future::join_all(editorconfig_contents)
+            );
             cx.update(|cx| {
                 this.update(cx, |this, cx| {
                     this.update_settings(
-                        worktree,
+                        &worktree,
                         settings_contents
                             .into_iter()
                             .map(|(path, content)| (path, content.and_then(|c| c.log_err()))),
                         cx,
-                    )
+                    );
+                    this.update_editorconfig_settings(
+                        &worktree,
+                        editorconfig_contents
+                            .into_iter()
+                            .map(|(path, content)| (path, content.and_then(|c| c.log_err()))),
+                        cx,
+                    );
                 })
             })
         })
@@ -409,7 +481,7 @@ impl SettingsObserver {
 
     fn update_settings(
         &mut self,
-        worktree: Model<Worktree>,
+        worktree: &Model<Worktree>,
         settings_contents: impl IntoIterator<Item = (Arc<Path>, Option<String>)>,
         cx: &mut ModelContext<Self>,
     ) {
@@ -427,6 +499,41 @@ impl SettingsObserver {
                             worktree_id: remote_worktree_id.to_proto(),
                             path: directory.to_string_lossy().into_owned(),
                             content: file_content,
+                            kind: proto::update_worktree_settings::SettingsKind::Zedconfig.into(),
+                        })
+                        .log_err();
+                }
+            }
+        })
+    }
+
+    fn update_editorconfig_settings(
+        &mut self,
+        worktree: &Model<Worktree>,
+        settings_contents: impl IntoIterator<Item = (Arc<Path>, Option<String>)>,
+        cx: &mut ModelContext<Self>,
+    ) {
+        let worktree_id = worktree.read(cx).id();
+        let remote_worktree_id = worktree.read(cx).id();
+        cx.update_global::<SettingsStore, _>(|store, cx| {
+            for (directory, file_content) in settings_contents {
+                store
+                    .set_editorconfig_settings(
+                        worktree_id,
+                        directory.clone(),
+                        file_content.as_deref(),
+                        cx,
+                    )
+                    .log_err();
+                if let Some(downstream_client) = &self.downstream_client {
+                    downstream_client
+                        .send(proto::UpdateWorktreeSettings {
+                            project_id: self.project_id,
+                            worktree_id: remote_worktree_id.to_proto(),
+                            path: directory.to_string_lossy().into_owned(),
+                            content: file_content,
+                            kind: proto::update_worktree_settings::SettingsKind::Editorconfig
+                                .into(),
                         })
                         .log_err();
                 }

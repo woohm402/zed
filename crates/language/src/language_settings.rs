@@ -66,6 +66,7 @@ pub struct AllLanguageSettings {
     pub inline_completions: InlineCompletionSettings,
     defaults: LanguageSettings,
     languages: HashMap<LanguageName, LanguageSettings>,
+    editorconfig_settings: Vec<(Option<GlobMatcher>, LanguageSettings)>,
     pub(crate) file_types: HashMap<Arc<str>, GlobSet>,
 }
 
@@ -806,21 +807,23 @@ impl AllLanguageSettings {
             .and_then(|name| self.languages.get(name))
             .unwrap_or(&self.defaults);
 
-        let editorconfig_settings =
-            abs_path_in_worktree.and_then(|(worktree_id, file_abs_path)| {
-                cx.global::<SettingsStore>().editorconfig_settings(
-                    worktree_id,
-                    language_name.map(|name| name.0.to_string()),
-                    &file_abs_path,
-                )
-            });
-        if let Some(content) = editorconfig_settings {
-            let mut settings = settings.clone();
-            merge_with_editorconfig(&mut settings, &content);
-            Cow::Owned(settings)
-        } else {
-            Cow::Borrowed(settings)
-        }
+        // TODO kb remove this and merge into AllLanguageSettings instead,
+        // to avoid doing anything extra during language config lookup
+        // let editorconfig_settings =
+        //     abs_path_in_worktree.and_then(|(worktree_id, file_abs_path)| {
+        //         cx.global::<SettingsStore>().editorconfig_settings(
+        //             worktree_id,
+        //             language_name.map(|name| name.0.to_string()),
+        //             &file_abs_path,
+        //         )
+        //     });
+        // if let Some(content) = editorconfig_settings {
+        //     let mut settings = settings.clone();
+        //     merge_with_editorconfig(&mut settings, &content);
+        //     Cow::Owned(settings)
+        // } else {
+        Cow::Borrowed(settings)
+        // }
     }
 
     /// Returns whether inline completions are enabled for the given path.
@@ -997,6 +1000,7 @@ impl settings::Settings for AllLanguageSettings {
                     .filter_map(|g| Some(globset::Glob::new(g).ok()?.compile_matcher()))
                     .collect(),
             },
+            editorconfig_settings: todo!("TODO kb"),
             defaults,
             languages,
             file_types,

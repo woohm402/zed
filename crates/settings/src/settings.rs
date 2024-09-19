@@ -14,7 +14,8 @@ pub use json_schema::*;
 pub use keymap_file::KeymapFile;
 pub use settings_file::*;
 pub use settings_store::{
-    EditorConfigContent, Settings, SettingsLocation, SettingsSources, SettingsStore, SoftWrap,
+    EditorConfigContent, Settings, SettingsKind, SettingsLocation, SettingsSources, SettingsStore,
+    SoftWrap,
 };
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]

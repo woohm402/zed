@@ -38,6 +38,7 @@ use core::fmt::{self, Debug, Formatter};
 use http_client::HttpClient;
 use isahc_http_client::IsahcHttpClient;
 use open_ai::{OpenAiEmbeddingModel, OPEN_AI_API_URL};
+use project::project_settings::settings_kind_to_proto;
 use sha2::Digest;
 use supermaven_api::{CreateExternalUserRequest, SupermavenAdminApi};
 
@@ -1742,6 +1743,7 @@ fn notify_rejoined_projects(
                         worktree_id: worktree.id,
                         path: settings_file.path,
                         content: Some(settings_file.content),
+                        kind: settings_kind_to_proto(&settings_file.kind),
                     },
                 )?;
             }
@@ -2223,6 +2225,7 @@ fn join_project_internal(
                     worktree_id: worktree.id,
                     path: settings_file.path,
                     content: Some(settings_file.content),
+                    kind: settings_kind_to_proto(&settings_file.kind),
                 },
             )?;
         }
