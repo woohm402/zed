@@ -29,6 +29,7 @@ pub struct HeadlessProject {
     pub worktree_store: Model<WorktreeStore>,
     pub buffer_store: Model<BufferStore>,
     pub lsp_store: Model<LspStore>,
+    pub task_inventory: Model<TaskInventory>,
     pub settings_observer: Model<SettingsObserver>,
     pub next_entry_id: Arc<AtomicUsize>,
     pub languages: Arc<LanguageRegistry>,

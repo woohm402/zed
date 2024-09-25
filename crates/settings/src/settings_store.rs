@@ -164,7 +164,8 @@ pub struct SettingsStore {
     raw_user_settings: serde_json::Value,
     raw_extension_settings: serde_json::Value,
     raw_local_settings: BTreeMap<(WorktreeId, Arc<Path>), serde_json::Value>,
-    tab_size_callback: Option<(
+    raw_local_settings: BTreeMap<(WorktreeId, Arc<Path>), String>,
+    tab_size_c_editrallback: Option<(
         TypeId,
         Box<dyn Fn(&dyn Any) -> Option<usize> + Send + Sync + 'static>,
     )>,

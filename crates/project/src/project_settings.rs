@@ -2,7 +2,10 @@ use collections::HashMap;
 use fs::Fs;
 use gpui::{AppContext, AsyncAppContext, BorrowAppContext, EventEmitter, Model, ModelContext};
 use language::LanguageServerName;
-use paths::local_settings_file_relative_path;
+use paths::{
+    local_settings_file_relative_path, local_tasks_file_relative_path,
+    local_vscode_tasks_file_relative_path,
+};
 use rpc::{proto, AnyProtoClient, TypedEnvelope};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -407,6 +410,52 @@ impl SettingsObserver {
                         },
                     )
                 });
+            } else if path.ends_with(local_tasks_file_relative_path()) {
+                self.task_inventory().update(cx, |task_inventory, cx| {
+                    if removed {
+                        task_inventory.remove_local_static_source(&abs_path);
+                    } else {
+                        let fs = self.fs.clone();
+                        let task_abs_path = abs_path.clone();
+                        let tasks_file_rx =
+                            watch_config_file(cx.background_executor(), fs, task_abs_path);
+                        task_inventory.add_source(
+                            TaskSourceKind::Worktree {
+                                id: remote_worktree_id,
+                                abs_path,
+                                id_base: "local_tasks_for_worktree".into(),
+                            },
+                            |tx, cx| StaticSource::new(TrackedFile::new(tasks_file_rx, tx, cx)),
+                            cx,
+                        );
+                    }
+                })
+            } else if path.ends_with(local_vscode_tasks_file_relative_path()) {
+                self.task_inventory().update(cx, |task_inventory, cx| {
+                    if removed {
+                        task_inventory.remove_local_static_source(&abs_path);
+                    } else {
+                        let fs = self.fs.clone();
+                        let task_abs_path = abs_path.clone();
+                        let tasks_file_rx =
+                            watch_config_file(cx.background_executor(), fs, task_abs_path);
+                        task_inventory.add_source(
+                            TaskSourceKind::Worktree {
+                                id: remote_worktree_id,
+                                abs_path,
+                                id_base: "local_vscode_tasks_for_worktree".into(),
+                            },
+                            |tx, cx| {
+                                StaticSource::new(TrackedFile::new_convertible::<
+                                    task::VsCodeTaskFile,
+                                >(
+                                    tasks_file_rx, tx, cx
+                                ))
+                            },
+                            cx,
+                        );
+                    }
+                })
             }
         }
 
@@ -436,7 +485,7 @@ impl SettingsObserver {
     fn update_settings(
         &mut self,
         worktree: Model<Worktree>,
-        settings_contents: impl IntoIterator<Item = (Arc<Path>, Option<String>)>,
+        settings_contents: impl IntoIterator<Item = (Arc<Path>, Option<String>, Kind)>,
         cx: &mut ModelContext<Self>,
     ) {
         let worktree_id = worktree.read(cx).id();

@@ -2060,29 +2060,22 @@ impl Project {
             }
         }
         cx.observe(worktree, |_, _, cx| cx.notify()).detach();
-        cx.subscribe(worktree, |this, worktree, event, cx| {
-            let is_local = worktree.read(cx).is_local();
-            match event {
-                worktree::Event::UpdatedEntries(changes) => {
-                    if is_local {
-                        this.update_local_worktree_settings(&worktree, changes, cx);
-                    }
+        cx.subscribe(worktree, |this, worktree, event, cx| match event {
+            worktree::Event::UpdatedEntries(changes) => {
+                cx.emit(Event::WorktreeUpdatedEntries(
+                    worktree.read(cx).id(),
+                    changes.clone(),
+                ));
 
-                    cx.emit(Event::WorktreeUpdatedEntries(
-                        worktree.read(cx).id(),
-                        changes.clone(),
-                    ));
-
-                    let worktree_id = worktree.update(cx, |worktree, _| worktree.id());
-                    this.client()
-                        .telemetry()
-                        .report_discovered_project_events(worktree_id, changes);
-                }
-                worktree::Event::UpdatedGitRepositories(_) => {
-                    cx.emit(Event::WorktreeUpdatedGitRepositories);
-                }
-                worktree::Event::DeletedEntry(id) => cx.emit(Event::DeletedEntry(*id)),
+                let worktree_id = worktree.update(cx, |worktree, _| worktree.id());
+                this.client()
+                    .telemetry()
+                    .report_discovered_project_events(worktree_id, changes);
             }
+            worktree::Event::UpdatedGitRepositories(_) => {
+                cx.emit(Event::WorktreeUpdatedGitRepositories);
+            }
+            worktree::Event::DeletedEntry(id) => cx.emit(Event::DeletedEntry(*id)),
         })
         .detach();
         cx.notify();
@@ -3087,77 +3080,6 @@ impl Project {
         self.worktree_store.update(cx, |worktree_store, cx| {
             worktree_store.add(worktree, cx);
         });
-    }
-
-    fn update_local_worktree_settings(
-        &mut self,
-        worktree: &Model<Worktree>,
-        changes: &UpdatedEntriesSet,
-        cx: &mut ModelContext<Self>,
-    ) {
-        if worktree.read(cx).is_remote() {
-            return;
-        }
-        let remote_worktree_id = worktree.read(cx).id();
-
-        for (path, _, change) in changes.iter() {
-            let removed = change == &PathChange::Removed;
-            let abs_path = match worktree.read(cx).absolutize(path) {
-                Ok(abs_path) => abs_path,
-                Err(e) => {
-                    log::warn!("Cannot absolutize {path:?} received as {change:?} FS change: {e}");
-                    continue;
-                }
-            };
-
-            if path.ends_with(local_tasks_file_relative_path()) {
-                self.task_inventory().update(cx, |task_inventory, cx| {
-                    if removed {
-                        task_inventory.remove_local_static_source(&abs_path);
-                    } else {
-                        let fs = self.fs.clone();
-                        let task_abs_path = abs_path.clone();
-                        let tasks_file_rx =
-                            watch_config_file(cx.background_executor(), fs, task_abs_path);
-                        task_inventory.add_source(
-                            TaskSourceKind::Worktree {
-                                id: remote_worktree_id,
-                                abs_path,
-                                id_base: "local_tasks_for_worktree".into(),
-                            },
-                            |tx, cx| StaticSource::new(TrackedFile::new(tasks_file_rx, tx, cx)),
-                            cx,
-                        );
-                    }
-                })
-            } else if path.ends_with(local_vscode_tasks_file_relative_path()) {
-                self.task_inventory().update(cx, |task_inventory, cx| {
-                    if removed {
-                        task_inventory.remove_local_static_source(&abs_path);
-                    } else {
-                        let fs = self.fs.clone();
-                        let task_abs_path = abs_path.clone();
-                        let tasks_file_rx =
-                            watch_config_file(cx.background_executor(), fs, task_abs_path);
-                        task_inventory.add_source(
-                            TaskSourceKind::Worktree {
-                                id: remote_worktree_id,
-                                abs_path,
-                                id_base: "local_vscode_tasks_for_worktree".into(),
-                            },
-                            |tx, cx| {
-                                StaticSource::new(TrackedFile::new_convertible::<
-                                    task::VsCodeTaskFile,
-                                >(
-                                    tasks_file_rx, tx, cx
-                                ))
-                            },
-                            cx,
-                        );
-                    }
-                })
-            }
-        }
     }
 
     pub fn set_active_path(&mut self, entry: Option<ProjectPath>, cx: &mut ModelContext<Self>) {
